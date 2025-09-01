@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>3D Racing Game - City Mode</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    #hud {
+      position: absolute; top: 15px; left: 15px;
+      color: white; font-family: Arial, sans-serif;
+      font-size: 20px; font-weight: bold;
+      text-shadow: 1px 1px 4px #000;
+      z-index: 10;
+    }
+    .mobile-controls {
+      position: absolute;
+      bottom: 20px;
+      width: 100%;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      z-index: 10;
+    }
+    .control-button {
+      width: 80px;
+      height: 80px;
+      background: rgba(255, 255, 255, 0.3);
+      border: 2px solid rgba(255, 255, 255, 0.6);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 30px;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      user-select: none; /* ป้องกันการเลือกข้อความ */
+    }
+    .gear-button {
+      font-size: 24px;
+      width: 60px;
+      height: 60px;
+      background: rgba(0, 0, 0, 0.3);
+    }
+    /* ใช้ Media Query เพื่อซ่อนปุ่มเมื่อหน้าจอมีขนาดใหญ่ขึ้น */
+    @media (min-width: 768px) {
+      .mobile-controls {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+<div id="hud">
+  Score: <span id="score">0</span> | Gear: <span id="gear">1</span>
+</div>
+
+<div class="mobile-controls">
+    <div class="control-button" id="btn-left">◀</div>
+    <div class="gear-buttons">
+        <div class="control-button gear-button" id="btn-shift">▲</div>
+        <div class="control-button gear-button" id="btn-ctrl">▼</div>
+    </div>
+    <div class="control-button" id="btn-right">▶</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+<script>
+let scene, camera, renderer;
+let player, road, score=0;
+let buildings = [];
+let obstacles = [];
+
+// --- ตัวแปรการขับ ---
+let gear = 1;
+let baseSpeed = 0.5;   // ความเร็วพื้นฐาน
+let carSpeed = 0;      // ความเร็วจริงของรถ
+let maxGear = 5;
+
+// --- สร้าง Scene ---
+scene = new THREE.Scene();
+camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- แสง ---
+const hemiLight = new THREE.HemisphereLight(0xffffff,0x444444,1.2);
+scene.add(hemiLight);
+const dirLight = new THREE.DirectionalLight(0xffffff,0.8);
+dirLight.position.set(5,10,5);
+scene.add(dirLight);
+
+// --- ถนน ---
+function createRoad(){
+  const geo = new THREE.PlaneGeometry(10,400);
+  const mat = new THREE.MeshPhongMaterial({ color:0x333333 });
+  const r = new THREE.Mesh(geo, mat);
+  r.rotation.x = -Math.PI/2;
+  r.position.z = -200;
+  return r;
+}
+road = createRoad();
+scene.add(road);
+
+// เส้นกลางถนน
+const lineGeo = new THREE.PlaneGeometry(0.2,400);
+const lineMat = new THREE.MeshBasicMaterial({ color:0xffff00 });
+const line = new THREE.Mesh(lineGeo,lineMat);
+line.rotation.x = -Math.PI/2;
+line.position.set(0,0.01,-200);
+scene.add(line);
+
+// --- รถผู้เล่น ---
+function createCar(color=0x1fb6ff){
+  const car = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(1,0.5,2),
+    new THREE.MeshPhongMaterial({ color })
+  );
+  body.position.y = 0.25;
+  car.add(body);
+
+  const cabin = new THREE.Mesh(
+    new THREE.BoxGeometry(0.8,0.4,0.8),
+    new THREE.MeshPhongMaterial({ color:0xeeeeee })
+  );
+  cabin.position.set(0,0.65,0);
+  car.add(cabin);
+
+  const wheelGeo = new THREE.CylinderGeometry(0.25,0.25,0.2,16);
+  const wheelMat = new THREE.MeshPhongMaterial({ color:0x000000 });
+  function addWheel(x,z){
+    const w = new THREE.Mesh(wheelGeo,wheelMat);
+    w.rotation.z = Math.PI/2;
+    w.position.set(x,0.15,z);
+    car.add(w);
+  }
+  addWheel(-0.5,0.8); addWheel(0.5,0.8);
+  addWheel(-0.5,-0.8); addWheel(0.5,-0.8);
+  return car;
+}
+player = createCar();
+player.position.set(0,0,5);
+scene.add(player);
+
+// --- เมือง (Buildings) ---
+function createBuilding(x,z){
+  const w = 1+Math.random()*2;
+  const h = 2+Math.random()*6;
+  const d = 1+Math.random()*2;
+  const geo = new THREE.BoxGeometry(w,h,d);
+  const mat = new THREE.MeshPhongMaterial({ color:0x888888+Math.random()*0x444444 });
+  const b = new THREE.Mesh(geo,mat);
+  b.position.set(x,h/2,z);
+  scene.add(b);
+  buildings.push(b);
+}
+for(let i=0;i<60;i++){
+  createBuilding(-8, -i*8);
+  createBuilding( 8, -i*8 - 4);
+}
+
+// --- Controls ---
+const keys = {};
+window.addEventListener("keydown", e=>{
+  keys[e.key] = true;
+  if(e.key==="Shift") gear = Math.min(maxGear, gear+1);
+  if(e.key==="Control") gear = Math.max(1, gear-1);
+  document.getElementById("gear").textContent = gear;
+});
+window.addEventListener("keyup", e=> keys[e.key] = false);
+
+// --- เพิ่มส่วนควบคุมสำหรับมือถือ ---
+const touchControls = { left: false, right: false };
+document.getElementById('btn-left').addEventListener('touchstart', () => touchControls.left = true);
+document.getElementById('btn-left').addEventListener('touchend', () => touchControls.left = false);
+document.getElementById('btn-right').addEventListener('touchstart', () => touchControls.right = true);
+document.getElementById('btn-right').addEventListener('touchend', () => touchControls.right = false);
+
+document.getElementById('btn-shift').addEventListener('click', () => {
+    gear = Math.min(maxGear, gear + 1);
+    document.getElementById("gear").textContent = gear;
+});
+document.getElementById('btn-ctrl').addEventListener('click', () => {
+    gear = Math.max(1, gear - 1);
+    document.getElementById("gear").textContent = gear;
+});
+
+// --- Spawn Obstacle ---
+function spawnObstacle(){
+  const obs = createCar(0xff4444);
+  obs.position.set((Math.random()-0.5)*6,0,-100);
+  scene.add(obs);
+  obstacles.push(obs);
+}
+
+// --- Camera ---
+camera.position.set(player.position.x, player.position.y + 2, player.position.z + 5); 
+camera.lookAt(player.position.x, player.position.y + 0.5, player.position.z - 5);
+
+
+// --- Game Loop ---
+function animate(){
+  requestAnimationFrame(animate);
+
+  carSpeed = baseSpeed * gear;
+
+  // Move player left/right (รองรับทั้งคีย์บอร์ดและมือถือ)
+  if(keys["ArrowLeft"] || keys["a"] || touchControls.left) player.position.x -= 0.1;
+  if(keys["ArrowRight"] || keys["d"] || touchControls.right) player.position.x += 0.1;
+
+  // Move world backwards (simulate car moving forward)
+  road.position.z += carSpeed;
+  line.position.z += carSpeed;
+  if(road.position.z > 0) road.position.z = -200;
+  if(line.position.z > 0) line.position.z = -200;
+
+  buildings.forEach(b=>{
+    b.position.z += carSpeed;
+    if(b.position.z>20){
+      b.position.z = -400;
+    }
+  });
+
+  obstacles.forEach((obs,i)=>{
+    obs.position.z += carSpeed;
+    if(obs.position.z > 10){
+      scene.remove(obs);
+      obstacles.splice(i,1);
+      score+=10;
+      document.getElementById("score").textContent=score;
+    }
+    // collision
+    if(Math.abs(obs.position.x - player.position.x) < 1 &&
+       Math.abs(obs.position.z - player.position.z) < 1.5){
+      alert("💥 Crash! Final Score: "+score);
+      window.location.reload();
+    }
+  });
+
+  // spawn enemy
+  if(Math.random()<0.02) spawnObstacle();
+
+  renderer.render(scene,camera);
+}
+animate();
+// ให้กล้องตามหลังรถ
+camera.position.lerp(
+  new THREE.Vector3(player.position.x, player.position.y + 2, player.position.z + 6),
+  0.1
+);
+camera.lookAt(player.position.x, player.position.y + 1, player.position.z - 10);
+
+// --- Resize ---
+window.addEventListener("resize",()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+</script>
+</body>
+</html>
